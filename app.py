@@ -1,4 +1,3 @@
-
 # NOTE: Streamlit removed for environments where it's not available
 # If needed, uncomment the Streamlit lines when running locally with Streamlit installed
 
@@ -136,19 +135,33 @@ if submitted:
         def save_model(self):
             torch.save(self.model.state_dict(), MODEL_PATH)
 
-    def load_portfolio_state(initial_cash):
-        if os.path.exists(PORTFOLIO_STATE):
-            with open(PORTFOLIO_STATE, 'r') as f:
-                return json.load(f)
-        else:
-            return {"cash": initial_cash, "shares": 0, "last_action": None}
+    def send_email(subject, body):
+        try:
+            msg = EmailMessage()
+            msg.set_content(body)
+            msg["Subject"] = subject
+            msg["From"] = "your_email@example.com"
+            msg["To"] = "recipient@example.com"
+            with smtplib.SMTP("smtp.example.com", 587) as server:
+                server.starttls()
+                server.login("your_email@example.com", "your_password")
+                server.send_message(msg)
+        except Exception as e:
+            print(f"Failed to send email: {e}")
 
     def save_portfolio_state(cash, shares, last_action):
         state = {"cash": cash, "shares": shares, "last_action": last_action}
         with open(PORTFOLIO_STATE, 'w') as f:
             json.dump(state, f)
 
-    def evaluate_today(agent, all_data, features, initial_cash):
+    def load_portfolio_state():
+        if os.path.exists(PORTFOLIO_STATE):
+            with open(PORTFOLIO_STATE, 'r') as f:
+                return json.load(f)
+        else:
+            return {"cash": initial_cash, "shares": 0, "last_action": None}
+
+    def evaluate_today(agent, all_data, features):
         today = all_data.index[-2]
         tomorrow = all_data.index[-1]
         state = all_data.loc[today, features].values
@@ -156,7 +169,7 @@ if submitted:
         price = all_data.loc[today, 'Close']
         next_price = all_data.loc[tomorrow, 'Close']
 
-        portfolio = load_portfolio_state(initial_cash)
+        portfolio = load_portfolio_state()
         cash, shares, last_action = portfolio['cash'], portfolio['shares'], portfolio['last_action']
 
         action = agent.act(state)
@@ -194,13 +207,19 @@ if submitted:
 
         return action_str, total_value
 
+    # 原始数据加载
     raw_data = load_data(symbol)
     all_data = compute_features(raw_data).dropna()
+    eval_data = all_data.copy()
+    eval_index = eval_data.index
+
     features = ['rsi', 'ma_ratio', 'volatility', 'volume_change', 'ema_diff', 'price_ema_ratio', 'bb_width', 'vix_change']
     features = [re.sub(r'[^A-Za-z0-9_]', '_', str(f)) for f in features]
     scaler = StandardScaler()
     all_data[features] = scaler.fit_transform(all_data[features])
 
     agent = RLAgent(state_size=len(features))
-    action_str, current_value = evaluate_today(agent, all_data, features, initial_cash)
+
+    action_str, current_value = evaluate_today(agent, all_data, features)
+
     st.success(f"今日建议：{action_str} 当前组合价值：${current_value:,.2f}")
