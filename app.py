@@ -155,11 +155,20 @@ if submitted:
             json.dump(state, f)
 
     def load_portfolio_state():
-        if os.path.exists(PORTFOLIO_STATE):
-            with open(PORTFOLIO_STATE, 'r') as f:
-                return json.load(f)
-        else:
-            return {"cash": initial_cash, "shares": 0, "last_action": None}
+        try:
+            if os.path.exists(PORTFOLIO_STATE):
+                with open(PORTFOLIO_STATE, 'r') as f:
+                    state = json.load(f)
+                # 如果缺失关键字段，回退到默认值
+                if not all(k in state for k in ['cash', 'shares', 'last_action']):
+                    raise ValueError("Invalid portfolio state structure.")
+                return state
+        except Exception as e:
+            print(f"加载投资组合状态失败，使用默认值: {e}")
+        
+        return {"cash": initial_cash, "shares": 0, "last_action": None}
+
+
 
     def evaluate_today(agent, all_data, features):
         today = all_data.index[-2]
