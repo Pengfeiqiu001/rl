@@ -223,3 +223,10 @@ if submitted:
     action_str, current_value = evaluate_today(agent, all_data, features)
 
     st.success(f"今日建议：{action_str} 当前组合价值：${current_value:,.2f}")
+    
+if __name__ == "__main__":
+    import sys
+    if "streamlit" not in sys.argv[0]:
+        # 非 Streamlit 环境，如 GitHub Actions
+        action_str, current_value = evaluate_today(agent, all_data, features)
+        print(f"AUTO ACTION: {action_str}, Portfolio: ${current_value:,.2f}")
