@@ -1,4 +1,6 @@
-# Streamlit 强化学习策略分析器（支持多股票、持仓追踪、每日更新）
+
+# NOTE: Streamlit removed for environments where it's not available
+# If needed, uncomment the Streamlit lines when running locally with Streamlit installed
 
 import streamlit as st
 import yfinance as yf
@@ -13,13 +15,18 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
-import json
-from email.message import EmailMessage
+import datetime
 import smtplib
+from email.message import EmailMessage
+import json
 
 transaction_fee_rate = 0.001
 short_term_penalty = -0.001
 MODEL_PATH = "model.pth"
+EMAIL_ALERT = False
+TRADE_LOG = "trade_log.csv"
+PORTFOLIO_STATE = "portfolio_state.json"
+DAILY_DECISION_LOG = "daily_decision_log.csv"
 
 st.set_page_config(page_title="RL 策略分析", layout="centered")
 st.title("🧠 强化学习策略分析器")
@@ -29,25 +36,19 @@ with st.form(key="ticker_form"):
     symbol = st.text_input("输入股票代码（如 AAPL、MSFT、TSLA）:", "QQQ").upper()
     initial_cash = st.number_input("初始投资金额（美元）", value=10000, min_value=100)
     retrain = st.checkbox("重新训练强化学习模型", value=False)
-    reset_portfolio = st.checkbox("重置投资组合", value=False)
     EMAIL_ALERT = st.checkbox("开启邮件提醒（需配置）", value=False)
     submitted = st.form_submit_button("开始分析")
 
 if submitted:
 
-    # 使用 symbol 创建独立状态路径
-    PORTFOLIO_STATE = f"portfolio_state_{symbol}.json"
-    DAILY_DECISION_LOG = f"daily_decision_log_{symbol}.csv"
-
-    if reset_portfolio and os.path.exists(PORTFOLIO_STATE):
-        os.remove(PORTFOLIO_STATE)
-
     def load_data(symbol):
         df = yf.download(symbol, start="2000-01-01", group_by='ticker')
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = ['_'.join(col).strip() for col in df.columns.values]
+
         vix = yf.download("^VIX", start="2000-01-01")[["Close"]]
         vix.columns = ["VIX"]
+
         combined = df.join(vix, how="inner")
         combined.dropna(inplace=True)
         return combined
@@ -146,10 +147,10 @@ if submitted:
                 with open(PORTFOLIO_STATE, 'r') as f:
                     state = json.load(f)
                 if not all(k in state for k in ['cash', 'shares', 'last_action']):
-                    raise ValueError("Invalid portfolio structure.")
+                    raise ValueError("Invalid portfolio state structure.")
                 return state
-        except:
-            pass
+        except Exception as e:
+            print(f"加载投资组合状态失败，使用默认值: {e}")
         return {"cash": initial_cash, "shares": 0, "last_action": None}
 
     def evaluate_today(agent, all_data, features):
@@ -186,19 +187,17 @@ if submitted:
         reward += (next_price - price) / price if shares > 0 else 0
         agent.remember(state, action, reward, next_state)
         agent.replay()
-
         save_portfolio_state(cash, shares, last_action)
 
-        log = pd.DataFrame([[today.date(), action_str, cash, shares, total_value]],
+        log = pd.DataFrame([[today.date(), action_str or "持仓不变", cash, shares, total_value]],
                            columns=["Date", "Action", "Cash", "Shares", "Portfolio"])
         if os.path.exists(DAILY_DECISION_LOG):
             log.to_csv(DAILY_DECISION_LOG, mode='a', header=False, index=False)
         else:
             log.to_csv(DAILY_DECISION_LOG, index=False)
 
-        return action_str, total_value
+        return action_str or "持仓不变", total_value, cash, shares, price
 
-    # 主流程执行
     raw_data = load_data(symbol)
     all_data = compute_features(raw_data).dropna()
     features = ['rsi', 'ma_ratio', 'volatility', 'volume_change', 'ema_diff', 'price_ema_ratio', 'bb_width', 'vix_change']
@@ -207,6 +206,13 @@ if submitted:
     all_data[features] = scaler.fit_transform(all_data[features])
 
     agent = RLAgent(state_size=len(features))
-    action_str, current_value = evaluate_today(agent, all_data, features)
+    action_str, current_value, cash, shares, price = evaluate_today(agent, all_data, features)
 
-    st.success(f"📌 今日建议：{action_str} 当前组合价值：${current_value:,.2f}")
+    st.success(f"✅ 今日建议：{action_str} 当前组合价值：${current_value:,.2f}")
+    st.subheader("💼 当前投资组合状态")
+    st.markdown(f'''
+- 💵 **现金余额**: ${cash:,.2f}  
+- 📦 **当前持股数**: {shares} 股  
+- 📈 **当前股价**: ${price:,.2f}  
+- 🧮 **当前组合总价值**: ${current_value:,.2f}
+''')
